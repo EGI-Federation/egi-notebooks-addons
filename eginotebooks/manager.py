@@ -9,6 +9,7 @@ from traitlets.traitlets import List, Unicode, Dict
 from traitlets import import_item
 
 from notebook.services.contents.largefilemanager import LargeFileManager
+from notebook.base.handlers import AuthenticatedFileHandler
 
 
 def _split_path(path):
@@ -22,6 +23,30 @@ def _split_path(path):
     list_path = path.split("/")
     sentinel = list_path.pop(0)
     return sentinel, list_path, path
+
+
+class MixedFileHandler(AuthenticatedFileHandler):
+    def get(self, path, include_body=True):
+        s, l, p = _split_path(path)
+        cm = self.contents_manager._get_cm(s, l)
+        if not cm:
+            return super(MixedFileHandler, self).get(path)
+        else:
+            # need to set some headers here
+            cm_path = "/".join(l[1:])
+
+            # Trick the manager into our path
+            self.absolute_path = cm_path
+            content_type = self.get_content_type()
+            if content_type:
+                self.set_header("Content-Type", content_type)
+            if include_body:
+                # Using innner knowledge of the OnedataFSContentsManager,
+                # will not work if other class is used
+                with cm.odfs.openbin("/".join(l[1:]), "rb") as f:
+                    self.write(content)
+                self.flush()
+            return
 
 
 # Base class will be responsible for handling those requests outside the
@@ -47,6 +72,7 @@ class MixedContentsManager(LargeFileManager):
         help="""List of virtual mount point name and corresponding contents manager""",
         config=True,
     )
+    files_handler_class = MixedFileHandler
 
     def __init__(self, **kwargs):
         super(MixedContentsManager, self).__init__(**kwargs)
@@ -275,30 +301,30 @@ class MixedContentsManager(LargeFileManager):
         """
 
         def _wrapper_method(self, old_path, new_path):
-            _, _old_path, old_sentinel = _split_path(old_path)
-            _, _new_path, new_sentinel = _split_path(new_path)
+            old_sentinel, old_listpath, old_path = _split_path(old_path)
+            new_sentinel, new_listpath, new_path = _split_path(new_path)
 
-            self.log.debug("%s AAAAAAAAAA %s", old_sentinel, new_sentinel)
+            cm = self._get_cm(old_sentinel, old_path)
+            new_cm = self._get_cm(new_sentinel, new_path)
 
-            if old_sentinel != new_sentinel:
+            if cm != new_cm:
                 raise ValueError(
                     "Does not know how to move things across contents manager mountpoints"
                 )
-            else:
-                sentinel = new_sentinel
 
-            man = self.managers.get(sentinel, None)
-            if man is not None:
-                rename_meth = getattr(man, rename_like_method.__name__)
-                sub = rename_meth("/".join(_old_path), "/".join(_new_path))
-                self.log.debug("AAAAAAAAAA")
-                self.log.debug("AAAAAAAAAA")
-                self.log.debug("AAAAAAAAAA")
-                self.log.debug("AAAAAAAAAA")
-                self.log.debug("AAAAAAAAAA")
-                return self.fix_path(sentinel, sub)
-            else:
+            if not cm:
+                if old_sentinel == self.mixed_path or new_sentinel == self.mixed_path:
+                    raise ValueError(
+                        "Does not know how to move things across contents manager mountpoints"
+                    )
                 return rename_like_method(self, old_path, new_path)
+            else:
+                base_path = os.path.join(sentinel, old_listpath[0])
+                rename_meth = getattr(cm, rename_like_method.__name__)
+                sub = rename_meth(
+                    "/".join(old_listpath[1:]), "/".join(new_listpath[1:])
+                )
+                return self.fix_path(sub)
 
         return _wrapper_method
 

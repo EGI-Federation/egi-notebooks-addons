@@ -5,10 +5,11 @@
 # Distributed under the terms of the Modified BSD License.
 import os.path
 
-
-from notebook.services.contents.manager import ContentsManager
 from traitlets.traitlets import List, Unicode, Dict
 from traitlets import import_item
+
+from notebook.services.contents.largefilemanager import LargeFileManager
+
 
 def _split_path(path):
     """split a path return by the api
@@ -22,16 +23,14 @@ def _split_path(path):
     sentinel = list_path.pop(0)
     return sentinel, list_path, path
 
-class MixedContentsManager(ContentsManager):
+
+# Base class will be responsible for handling those requests outside the
+# "mixed_path", using LargeFileManager as it's the default in the current
+# notebooks implementation
+class MixedContentsManager(LargeFileManager):
     mixed_path = Unicode("datahub",
                         help="path were the mixed content managers will reside",
                         config=True)
-    root_manager = Dict({
-            "class": "IPython.html.services.contents.filemanager.FileContentsManager",
-            "config": None
-            },
-        help="default content manager for /",
-        config=True)
     filesystem_scheme = List([
             {
                 'root':'space1',
@@ -66,12 +65,6 @@ class MixedContentsManager(ContentsManager):
             if scheme['config']:
                 for k, v in scheme['config'].items():
                     setattr(self.managers[scheme['root']], k, v)
-        root_manager_class = import_item(self.root_manager['class'])
-        self.root_cm = root_manager_class(**kwargs)
-        if self.root_manager['config']:
-            for k, v in self.root_manager['config'].items():
-                setattr(self.root_cm, k, v)
-
         self.log.debug("MANAGERS: %s", self.managers)
 
     def _fix_paths(self, sub, base_path):
@@ -145,30 +138,30 @@ class MixedContentsManager(ContentsManager):
         ## root exists
         if (len(path) == 0) or path == self.mixed_path:
             return True
-        return self.root_cm.dir_exists(os.path.join('/', path))
+        return super(MixedContentsManager, self).dir_exists(os.path.join('/', path))
 
     @path_dispatch1
     def is_hidden(self, path):
         if (len(path) == 0) or path == self.mixed_path:
             return False;
-        return self.root_cm.is_hidden(os.path.join('/', path))
+        return super(MixedContentsManager, self).is_hidden(os.path.join('/', path))
 
     @path_dispatch_kwarg
     def file_exists(self, path=''):
         if (len(path) == 0) or path == self.mixed_path:
             return False
-        return self.root_cm.file_exists(os.path.join('/', path))
+        return super(MixedContentsManager, self).file_exists(os.path.join('/', path))
 
     @path_dispatch1
     def exists(self, path):
         if (len(path) == 0) or path == self.mixed_path:
             return True
-        return self.root_cm.exists(os.path.join('/', path))
+        return super(MixedContentsManager, self).exists(os.path.join('/', path))
 
     @path_dispatch1
     def get(self, path, **kwargs):
         if len(path) == 0:
-            root = self.root_cm.get('/', **kwargs)
+            root = super(MixedContentsManager, self).get('/', **kwargs)
             root['content'].append({'type': 'directory',
                                     'name': self.mixed_path,
                                     'path': self.mixed_path})
@@ -200,11 +193,11 @@ class MixedContentsManager(ContentsManager):
             root['last_modified'] = max(lm)
             root['created'] = min(lm)
             return root
-        return self.root_cm.get(os.path.join('/', path), **kwargs)
+        return super(MixedContentsManager, self).get(os.path.join('/', path), **kwargs)
 
     @path_dispatch2
     def save(self, model, path):
-        return self.root_cm.save(model, path)
+        return super(MixedContentsManager, self).save(model, path)
 
     def update(self, model, path):
         sentinel, listpath, _path = _split_path(path)
@@ -223,27 +216,27 @@ class MixedContentsManager(ContentsManager):
             sub = meth(model, '/'.join(listpath[1:]))
             return self._fix_paths(sub, base_path)
         else:
-            return self.root_cm.update(model, path)
+            return super(MixedContentsManager, self).update(model, path)
 
     @path_dispatch1
     def delete(self, path):
-        return self.root_cm.delete(path)
+        return super(MixedContentsManager, self).delete(path)
 
     @path_dispatch1
     def create_checkpoint(self, path):
-        return self.root_cm.create_checkpoint(path)
+        return super(MixedContentsManager, self).create_checkpoint(path)
 
     @path_dispatch1
     def list_checkpoints(self, path):
-        return self.root_cm.list_checkpoints(path)
+        return super(MixedContentsManager, self).list_checkpoints(path)
 
     @path_dispatch2
     def restore_checkpoint(self, checkpoint_id, path):
-        return self.root_cm.restore_checkpoints(path)
+        return super(MixedContentsManager, self).restore_checkpoints(path)
 
     @path_dispatch2
     def delete_checkpoint(self, checkpoint_id, path):
-        return self.root_cm.delete_checkpoints(path)
+        return super(MixedContentsManager, self).delete_checkpoints(path)
 
     # ContentsManager API part 2: methods that have useable default
     # implementations, but can be overridden in subclasses.
@@ -285,9 +278,9 @@ class MixedContentsManager(ContentsManager):
 
     @path_dispatch_rename
     def rename_file(self, old_path, new_path):
-        return self.root_cm.rename_file(old_path, new_path)
+        return super(MixedContentsManager, self).rename_file(old_path, new_path)
 
     @path_dispatch_rename
     def rename(self, old_path, new_path):
         """Rename a file."""
-        return self.root_cm.rename(old_path, new_path)
+        return super(MixedContentsManager, self).rename(old_path, new_path)

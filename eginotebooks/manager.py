@@ -43,8 +43,9 @@ class MixedFileHandler(AuthenticatedFileHandler):
             if include_body:
                 # Using innner knowledge of the OnedataFSContentsManager,
                 # will not work if other class is used
+                # this should be done in chunks also...
                 with cm.odfs.openbin("/".join(l[1:]), "rb") as f:
-                    self.write(content)
+                    self.write(f.read())
                 self.flush()
             return
 
